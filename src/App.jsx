@@ -12,16 +12,26 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "./firebase";
+import { useAuth } from "./AuthContext";
+import LoginPage from "./LoginPage";
 
 function App() {
   const [tasks, setTasks] = useState([]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
-  const [loading, setLoading] = useState(true);
+  const [tasksLoading, setTasksLoading] = useState(true);
+  const { user, loading, logout } = useAuth();
 
   // Listen to Firestore in realtime
   useEffect(() => {
+    if (!user) {
+      setTasks([]);
+      setTasksLoading(false);
+      return undefined;
+    }
+
+    setTasksLoading(true);
     const q = query(collection(db, "tasks"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(
       q,
@@ -31,26 +41,34 @@ function App() {
           ...d.data(),
         }));
         setTasks(list);
-        setLoading(false);
+        setTasksLoading(false);
       },
       (err) => {
-        console.error("Failed to load tasks", err);
+        console.error(
+          "Firestore onSnapshot error:",
+          err?.code,
+          err?.message,
+          err
+        );
         setError("Failed to load tasks. Please try again.");
-        setLoading(false);
+        setTasksLoading(false);
       }
     );
 
     return () => unsubscribe();
-  }, []);
+  }, [user]);
 
   // Add new task
   const handleAddTask = async (e) => {
     e.preventDefault();
-    if (!title.trim()) return;
+    const trimmedTitle = title.trim();
+    if (!trimmedTitle) return;
+    if (!user) return;
 
     try {
+      console.log("Adding task:", trimmedTitle);
       await addDoc(collection(db, "tasks"), {
-        title: title.trim(),
+        title: trimmedTitle,
         description: description.trim(),
         completed: false,
         createdAt: serverTimestamp(),
@@ -60,7 +78,7 @@ function App() {
       setError("");
     } catch (err) {
       console.error("Failed to add task", err);
-      setError("Failed to add task. Please try again.");
+      setError("Could not add task, check console.");
     }
   };
 
@@ -92,10 +110,29 @@ function App() {
     }
   };
 
-  const isAddDisabled = !title.trim();
+  const trimmedTitle = title.trim();
+  const isAddDisabled = !trimmedTitle;
   const totalTasks = tasks.length;
   const completedTasks = tasks.filter((t) => t.completed).length;
   const pendingTasks = totalTasks - completedTasks;
+
+  if (loading) {
+    return (
+      <div className="app">
+        <div className="app-inner">
+          <div className="app-card">
+            <p className="muted-text" style={{ textAlign: "center" }}>
+              Checking authentication...
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginPage />;
+  }
 
   return (
     <div className="app">
@@ -103,6 +140,9 @@ function App() {
         <div className="app-card">
           <header className="app-header">
             <h1 className="app-title">Firestore Task Manager</h1>
+            <button className="btn btn-secondary" onClick={logout}>
+              Logout
+            </button>
           </header>
 
           {error && <div className="error-alert">{error}</div>}
@@ -177,10 +217,10 @@ function App() {
             </div>
 
             <div className="task-list">
-              {loading && totalTasks === 0 && (
+              {tasksLoading && totalTasks === 0 && (
                 <p className="muted-text">Loading tasks...</p>
               )}
-              {!loading && totalTasks === 0 && (
+              {!tasksLoading && totalTasks === 0 && (
                 <p className="muted-text">
                   No tasks yet. Add one to get started.
                 </p>
